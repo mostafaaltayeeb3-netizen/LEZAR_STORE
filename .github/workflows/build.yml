@@ -1,4 +1,3 @@
-
 name: Build LEZAR STORE APK
 
 on:
@@ -12,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -30,29 +30,51 @@ jobs:
       - name: Unpack project ZIP
         run: unzip -o LEZAR_STORE_project.zip
 
-      - name: Find project and align Java and Kotlin
+      - name: Find project and fix JVM targets
         id: setup
         shell: bash
         run: |
           SETTINGS_FILE="$(find . -type f \( -name settings.gradle.kts -o -name settings.gradle \) -not -path '*/.gradle/*' -print -quit)"
+
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "Gradle settings file not found"
+            echo "ERROR: Gradle settings file not found"
             find . -maxdepth 5 -type f | sort | head -200
             exit 1
           fi
 
           PROJECT_DIR="$(dirname "$SETTINGS_FILE")"
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
           APP_GRADLE="$PROJECT_DIR/app/build.gradle.kts"
+
           if [ ! -f "$APP_GRADLE" ]; then
-            echo "App Gradle file not found: $APP_GRADLE"
+            echo "ERROR: App Gradle file not found: $APP_GRADLE"
             exit 1
           fi
 
-          sed -i 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' "$APP_GRADLE"
-          sed -i 's/jvmTarget = "1.8"/jvmTarget = "17"/g' "$APP_GRADLE"
-          sed -i 's/jvmTarget = '\''1.8'\''/jvmTarget = '\''17'\''/g' "$APP_GRADLE"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+          # Align existing Java and Kotlin targets where possible.
+          sed -i \
+            -e 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' \
+            -e 's/JavaVersion.VERSION_1_8/JavaVersion.VERSION_17/g' \
+            -e 's/jvmTarget = "1.8"/jvmTarget = "17"/g' \
+            -e "s/jvmTarget = '1.8'/jvmTarget = '17'/g" \
+            "$APP_GRADLE"
+
+          # Explicitly force both compiler tasks to target Java 17.
+          cat >> "$APP_GRADLE" <<'GRADLE'
+
+          tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
+              sourceCompatibility = "17"
+              targetCompatibility = "17"
+          }
+
+          tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+              kotlinOptions.jvmTarget = "17"
+          }
+          GRADLE
+
+          echo "Gradle configuration prepared."
+          tail -20 "$APP_GRADLE"
 
       - name: Build debug APK
         run: gradle -p "${{ steps.setup.outputs.project_dir }}" assembleDebug --stacktrace
